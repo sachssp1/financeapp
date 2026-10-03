@@ -1,0 +1,1636 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Personal Stock Dashboard</title>
+  <meta name="description" content="Portfolio tracking and Core/Satellite asset allocation with live Yahoo Finance (RapidAPI) quotes." />
+
+  <!-- Tailwind CSS (Play CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    if (window.tailwind) tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
+            mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace'],
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- Lucide Icons (UMD build, pinned) -->
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+
+  <style>
+    :root { color-scheme: dark; }
+    body { font-feature-settings: "tnum" 1, "cv11" 1; }
+    .num { font-variant-numeric: tabular-nums; }
+
+    /* Range slider */
+    input[type=range].slider { -webkit-appearance: none; appearance: none; height: 8px; border-radius: 9999px; outline: none; cursor: pointer; }
+    input[type=range].slider::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none; width: 20px; height: 20px; border-radius: 9999px;
+      background: #fafafa; border: 3px solid #0ea5e9; box-shadow: 0 0 0 4px rgba(14,165,233,.18); transition: transform .15s ease;
+    }
+    input[type=range].slider::-webkit-slider-thumb:hover { transform: scale(1.12); }
+    input[type=range].slider::-moz-range-thumb {
+      width: 16px; height: 16px; border-radius: 9999px; background: #fafafa; border: 3px solid #0ea5e9;
+    }
+    input[type=range].slider:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 6px rgba(14,165,233,.35); }
+
+    /* Hide number spinners */
+    input[type=number]::-webkit-outer-spin-button,
+    input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
+
+    /* Thin scrollbars */
+    .thin-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+    .thin-scroll::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 9999px; }
+    .thin-scroll::-webkit-scrollbar-track { background: transparent; }
+
+    .cell-input {
+      width: 100%; background: transparent; border: 1px solid transparent; border-radius: .5rem;
+      padding: .375rem .5rem; color: #f4f4f5; transition: border-color .15s, background .15s;
+    }
+    .cell-input:hover { border-color: #3f3f46; }
+    .cell-input:focus { outline: none; border-color: #0ea5e9; background: #18181b; }
+
+    .donut-seg { transition: stroke-dasharray .5s cubic-bezier(.2,.8,.2,1), stroke-dashoffset .5s cubic-bezier(.2,.8,.2,1); }
+    .fade-in { animation: fadeIn .25s ease both; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+    .flash-up { animation: flashUp 1.2s ease; }
+    .flash-down { animation: flashDown 1.2s ease; }
+    @keyframes flashUp { 0% { background: rgba(16,185,129,.25); } 100% { background: transparent; } }
+    @keyframes flashDown { 0% { background: rgba(244,63,94,.25); } 100% { background: transparent; } }
+    .spin { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+
+<body class="min-h-screen bg-zinc-950 text-zinc-100 font-sans antialiased selection:bg-sky-500/30">
+  <!-- Subtle background glow -->
+  <div aria-hidden="true" class="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+    <div class="absolute -top-40 left-1/4 h-96 w-96 rounded-full bg-emerald-500/10 blur-3xl"></div>
+    <div class="absolute top-1/3 -right-20 h-96 w-96 rounded-full bg-sky-500/10 blur-3xl"></div>
+  </div>
+
+  <!-- ============================== HEADER ============================== -->
+  <header class="sticky top-0 z-40 border-b border-zinc-800/80 bg-zinc-950/80 backdrop-blur-xl">
+    <div class="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+      <div class="flex min-w-0 items-center gap-3">
+        <div class="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-emerald-400 to-sky-500 text-zinc-950 shadow-lg shadow-emerald-500/20">
+          <i data-lucide="line-chart" class="h-5 w-5"></i>
+        </div>
+        <div class="min-w-0">
+          <h1 class="truncate text-base font-semibold tracking-tight text-white sm:text-lg">Personal Stock Dashboard</h1>
+          <p class="hidden text-xs text-zinc-400 sm:block">Core / Satellite allocation · Yahoo Finance via RapidAPI</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <div id="dataStatus" class="hidden items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900/80 px-3 py-1.5 text-xs md:flex"></div>
+        <button id="refreshBtn" type="button" title="Refresh quotes (respects 5-minute cache)"
+          class="inline-flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 transition hover:border-zinc-700 hover:bg-zinc-800">
+          <i data-lucide="refresh-cw" class="h-4 w-4" id="refreshIcon"></i>
+          <span class="hidden sm:inline">Refresh</span>
+        </button>
+        <button id="openSettingsBtn" type="button"
+          class="inline-flex items-center gap-2 rounded-lg bg-sky-500 px-3 py-2 text-sm font-medium text-zinc-950 shadow-lg shadow-sky-500/20 transition hover:bg-sky-400">
+          <i data-lucide="key-round" class="h-4 w-4"></i>
+          <span class="hidden sm:inline">API Settings</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Fallback banner (shown when no API key / API failure) -->
+    <div id="fallbackBanner" class="hidden border-t border-amber-500/20 bg-amber-500/10">
+      <div class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-4 py-2 text-sm sm:px-6">
+        <p class="flex items-center gap-2 text-amber-200">
+          <i data-lucide="info" class="h-4 w-4 shrink-0"></i>
+          <span id="fallbackText">Running on built-in fallback market data.</span>
+        </p>
+        <button id="bannerSettingsBtn" type="button" class="rounded-md border border-amber-400/30 px-2.5 py-1 text-xs font-medium text-amber-100 hover:bg-amber-400/10">
+          Connect RapidAPI key
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
+    <!-- Mobile-only status -->
+    <div id="dataStatusMobile" class="flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-xs md:hidden"></div>
+
+    <!-- ============================== KPI ROW ============================== -->
+    <section aria-label="Portfolio summary" class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
+        <div class="flex items-center justify-between text-xs font-medium uppercase tracking-wider text-zinc-400">
+          Capital Base <i data-lucide="landmark" class="h-4 w-4 text-zinc-500"></i>
+        </div>
+        <div id="kpiCapital" class="num mt-2 text-2xl font-semibold text-white">£0.00</div>
+        <div id="kpiCapitalSub" class="num mt-1 text-xs text-zinc-400"></div>
+      </div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
+        <div class="flex items-center justify-between text-xs font-medium uppercase tracking-wider text-zinc-400">
+          Portfolio Value <i data-lucide="wallet" class="h-4 w-4 text-zinc-500"></i>
+        </div>
+        <div id="kpiValue" class="num mt-2 text-2xl font-semibold text-white">£0.00</div>
+        <div id="kpiValueSub" class="num mt-1 text-xs text-zinc-400"></div>
+      </div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
+        <div class="flex items-center justify-between text-xs font-medium uppercase tracking-wider text-zinc-400">
+          Total Gain / Loss <i data-lucide="trending-up" class="h-4 w-4 text-zinc-500" id="kpiGainIcon"></i>
+        </div>
+        <div id="kpiGain" class="num mt-2 text-2xl font-semibold">£0.00</div>
+        <div id="kpiGainSub" class="num mt-1 text-xs"></div>
+      </div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
+        <div class="flex items-center justify-between text-xs font-medium uppercase tracking-wider text-zinc-400">
+          Today's Move <i data-lucide="activity" class="h-4 w-4 text-zinc-500"></i>
+        </div>
+        <div id="kpiDay" class="num mt-2 text-2xl font-semibold">£0.00</div>
+        <div id="kpiDaySub" class="num mt-1 text-xs"></div>
+      </div>
+    </section>
+
+    <!-- ============================== MARKET STRIP ============================== -->
+    <section aria-label="Market quotes">
+      <div id="marketStrip" class="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5"></div>
+    </section>
+
+    <!-- ============================== ALLOCATION CALCULATOR ============================== -->
+    <section aria-labelledby="allocTitle" class="rounded-2xl border border-zinc-800 bg-zinc-900/60">
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 px-5 py-4">
+        <div>
+          <h2 id="allocTitle" class="flex items-center gap-2 text-base font-semibold text-white">
+            <i data-lucide="pie-chart" class="h-5 w-5 text-sky-400"></i> Dynamic Allocation Calculator
+          </h2>
+          <p class="mt-0.5 text-xs text-zinc-400">Split capital between Core and Satellite, then size each order from live or fallback prices.</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <button type="button" id="applyPlanBtn"
+            class="inline-flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-300 transition hover:bg-emerald-500/20">
+            <i data-lucide="clipboard-check" class="h-4 w-4"></i> Apply plan to watchlist
+          </button>
+          <button type="button" id="resetAllocBtn"
+            class="inline-flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-300 transition hover:bg-zinc-800">
+            <i data-lucide="rotate-ccw" class="h-4 w-4"></i> Reset 70/30
+          </button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 gap-6 p-5 lg:grid-cols-12">
+        <!-- Controls + donut -->
+        <div class="min-w-0 space-y-5 lg:col-span-5">
+          <div class="flex flex-col items-center gap-5 sm:flex-row sm:items-center">
+            <div class="relative h-44 w-44 shrink-0">
+              <svg id="donut" viewBox="0 0 42 42" class="h-full w-full" role="img" aria-label="Allocation donut chart"></svg>
+              <div class="pointer-events-none absolute inset-0 grid place-items-center text-center">
+                <div>
+                  <div id="donutCenterTop" class="num text-lg font-semibold text-white">70 / 30</div>
+                  <div class="text-[10px] uppercase tracking-wider text-zinc-400">Core / Sat.</div>
+                </div>
+              </div>
+            </div>
+            <div id="donutLegend" class="grid w-full grid-cols-1 gap-2 text-sm"></div>
+          </div>
+
+          <!-- Capital input -->
+          <div>
+            <label for="capitalInput" class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-zinc-400">Total capital (GBP)</label>
+            <div class="flex items-center rounded-lg border border-zinc-800 bg-zinc-950 focus-within:border-sky-500">
+              <span class="pl-3 text-zinc-500">£</span>
+              <input id="capitalInput" type="number" min="0" step="100" inputmode="decimal"
+                class="num w-full bg-transparent px-2 py-2.5 text-white outline-none" />
+            </div>
+          </div>
+
+          <!-- Core / Satellite split -->
+          <div>
+            <div class="mb-2 flex items-center justify-between">
+              <span class="text-xs font-medium uppercase tracking-wider text-zinc-400">Core / Satellite split</span>
+              <div class="flex gap-1">
+                <button type="button" data-preset="60" class="preset-btn rounded-md border border-zinc-800 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800">60/40</button>
+                <button type="button" data-preset="70" class="preset-btn rounded-md border border-zinc-800 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800">70/30</button>
+                <button type="button" data-preset="80" class="preset-btn rounded-md border border-zinc-800 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800">80/20</button>
+              </div>
+            </div>
+            <input id="coreSlider" type="range" min="0" max="100" step="1" class="slider w-full" aria-label="Core allocation percentage" />
+            <div class="mt-3 grid grid-cols-2 gap-3">
+              <label class="block">
+                <span class="mb-1 flex items-center gap-1.5 text-xs text-sky-300"><span class="h-2 w-2 rounded-full bg-sky-400"></span>Core %</span>
+                <input id="coreInput" type="number" min="0" max="100" step="1" class="num w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-sky-500" />
+              </label>
+              <label class="block">
+                <span class="mb-1 flex items-center gap-1.5 text-xs text-violet-300"><span class="h-2 w-2 rounded-full bg-violet-400"></span>Satellite %</span>
+                <input id="satInput" type="number" min="0" max="100" step="1" class="num w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-violet-500" />
+              </label>
+            </div>
+          </div>
+
+          <!-- Intra-segment weights -->
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <div class="mb-1.5 flex justify-between text-xs text-zinc-400">
+                <span>AAPL <b id="coreSplitA" class="num text-zinc-200">50%</b></span>
+                <span>AVGO <b id="coreSplitB" class="num text-zinc-200">50%</b></span>
+              </div>
+              <input id="coreSplit" type="range" min="0" max="100" step="5" class="slider w-full" aria-label="AAPL share of Core segment" />
+            </div>
+            <div>
+              <div class="mb-1.5 flex justify-between text-xs text-zinc-400">
+                <span>APLD <b id="satSplitA" class="num text-zinc-200">50%</b></span>
+                <span>SEZL <b id="satSplitB" class="num text-zinc-200">50%</b></span>
+              </div>
+              <input id="satSplit" type="range" min="0" max="100" step="5" class="slider w-full" aria-label="APLD share of Satellite segment" />
+            </div>
+          </div>
+
+          <!-- Share mode -->
+          <div class="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+            <div>
+              <div class="text-sm font-medium text-zinc-200">Whole shares only</div>
+              <div class="text-xs text-zinc-400">Off = fractional shares (4 d.p.) for full deployment</div>
+            </div>
+            <button type="button" id="wholeToggle" role="switch" aria-checked="false"
+              class="relative h-6 w-11 shrink-0 rounded-full bg-zinc-700 transition">
+              <span class="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition"></span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Order table -->
+        <div class="min-w-0 lg:col-span-7">
+          <div class="relative overflow-x-auto thin-scroll rounded-xl border border-zinc-800">
+            <table class="w-full min-w-[640px] text-sm">
+              <thead class="bg-zinc-900 text-left text-[11px] uppercase tracking-wider text-zinc-400">
+                <tr>
+                  <th class="px-3 py-2.5 font-medium">Asset</th>
+                  <th class="px-3 py-2.5 text-right font-medium">Weight</th>
+                  <th class="px-3 py-2.5 text-right font-medium">Target</th>
+                  <th class="px-3 py-2.5 text-right font-medium">Price</th>
+                  <th class="px-3 py-2.5 text-right font-medium">Shares to buy</th>
+                  <th class="px-3 py-2.5 text-right font-medium">Est. cost</th>
+                </tr>
+              </thead>
+              <tbody id="planBody" class="divide-y divide-zinc-800/80"></tbody>
+              <tfoot id="planFoot" class="border-t border-zinc-700 bg-zinc-900/80"></tfoot>
+            </table>
+          </div>
+          <div id="deployMeter" class="mt-4"></div>
+          <p class="mt-3 flex items-start gap-2 text-xs text-zinc-500">
+            <i data-lucide="info" class="mt-0.5 h-3.5 w-3.5 shrink-0"></i>
+            <span>USD prices are converted to GBP at the live GBP/USD rate (editable in the market strip). Shares are rounded <em>down</em> and costs rounded <em>up</em> to the penny, so the plan never exceeds your capital. In whole-share mode a residual sweep buys extra shares where the target is most under-filled.</span>
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== WATCHLIST + NEWS ============================== -->
+    <div class="space-y-6">
+      <!-- Watchlist -->
+      <section aria-labelledby="watchTitle" class="rounded-2xl border border-zinc-800 bg-zinc-900/60">
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 px-5 py-4">
+          <div>
+            <h2 id="watchTitle" class="flex items-center gap-2 text-base font-semibold text-white">
+              <i data-lucide="list-checks" class="h-5 w-5 text-emerald-400"></i> Live Portfolio Watchlist
+            </h2>
+            <p class="mt-0.5 text-xs text-zinc-400">Edit any cell. Prices sync from the API; type a price to override it manually.</p>
+          </div>
+          <button type="button" id="addHoldingBtn"
+            class="inline-flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 transition hover:bg-zinc-700">
+            <i data-lucide="plus" class="h-4 w-4"></i> Add holding
+          </button>
+        </div>
+        <div class="relative overflow-x-auto thin-scroll">
+          <table class="w-full min-w-[1000px] text-sm">
+            <thead class="text-left text-[11px] uppercase tracking-wider text-zinc-400">
+              <tr class="border-b border-zinc-800">
+                <th class="px-3 py-2.5 font-medium">Ticker</th>
+                <th class="px-3 py-2.5 font-medium">Segment</th>
+                <th class="px-3 py-2.5 text-right font-medium">Shares</th>
+                <th class="px-3 py-2.5 text-right font-medium">Purchase price</th>
+                <th class="px-3 py-2.5 text-right font-medium">Market price</th>
+                <th class="px-3 py-2.5 text-right font-medium">Position value</th>
+                <th class="px-3 py-2.5 text-right font-medium">Gain / Loss</th>
+                <th class="px-3 py-2.5 font-medium">Weight</th>
+                <th class="px-2 py-2.5"><span class="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody id="holdingsBody" class="divide-y divide-zinc-800/70"></tbody>
+            <tfoot id="holdingsFoot" class="border-t border-zinc-700"></tfoot>
+          </table>
+        </div>
+        <div id="driftPanel" class="border-t border-zinc-800 px-5 py-4"></div>
+      </section>
+
+      <!-- News & Trend Stream -->
+      <section aria-labelledby="newsTitle" class="flex flex-col rounded-2xl border border-zinc-800 bg-zinc-900/60">
+        <div class="border-b border-zinc-800 px-5 py-4">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 id="newsTitle" class="flex items-center gap-2 text-base font-semibold text-white">
+              <i data-lucide="newspaper" class="h-5 w-5 text-amber-300"></i> News &amp; Trend Stream
+            </h2>
+            <button type="button" id="addNoteBtn"
+              class="inline-flex items-center gap-1.5 rounded-lg bg-amber-400 px-2.5 py-1.5 text-xs font-semibold text-zinc-950 transition hover:bg-amber-300">
+              <i data-lucide="notebook-pen" class="h-3.5 w-3.5"></i> Add Macro Note
+            </button>
+          </div>
+          <p class="mt-0.5 text-xs text-zinc-500">Simulated high-signal feed · your notes are saved in this browser</p>
+
+          <!-- Note form -->
+          <form id="noteForm" class="mt-3 hidden max-w-xl space-y-2 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3">
+            <div class="grid grid-cols-2 gap-2">
+              <select id="noteTag" class="rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-200 outline-none focus:border-amber-400">
+                <option value="MACRO">MACRO</option>
+                <option value="AAPL">AAPL</option>
+                <option value="AVGO">AVGO</option>
+                <option value="APLD">APLD</option>
+                <option value="SEZL">SEZL</option>
+              </select>
+              <select id="noteSentiment" class="rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-200 outline-none focus:border-amber-400">
+                <option value="neutral">Neutral</option>
+                <option value="bullish">Bullish</option>
+                <option value="bearish">Bearish</option>
+              </select>
+            </div>
+            <textarea id="noteText" rows="3" maxlength="500" required placeholder="e.g. 10Y gilt yield breaking higher — watch long-duration growth names…"
+              class="w-full resize-none rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none focus:border-amber-400"></textarea>
+            <div class="flex items-center justify-between">
+              <span id="noteCount" class="num text-[11px] text-zinc-500">0 / 500</span>
+              <div class="flex gap-2">
+                <button type="button" id="cancelNoteBtn" class="rounded-lg px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200">Cancel</button>
+                <button type="submit" class="rounded-lg bg-amber-400 px-3 py-1.5 text-xs font-semibold text-zinc-950 hover:bg-amber-300">Save note</button>
+              </div>
+            </div>
+          </form>
+
+          <!-- Filters -->
+          <div class="mt-3 flex flex-wrap gap-1.5" id="newsTabs"></div>
+          <div class="mt-2 flex flex-wrap gap-1.5" id="newsFilters"></div>
+        </div>
+        <ul id="newsList" class="thin-scroll grid max-h-[720px] flex-1 grid-cols-1 content-start gap-2 overflow-y-auto p-3 md:grid-cols-2"></ul>
+      </section>
+    </div>
+
+    <footer class="pb-6 pt-2 text-center text-xs text-zinc-500">
+      Market data via Yahoo Finance (RapidAPI) when connected; otherwise illustrative fallback prices. Not investment advice.
+    </footer>
+  </main>
+
+  <!-- ============================== SETTINGS MODAL ============================== -->
+  <div id="settingsModal" class="fixed inset-0 z-50 hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" data-close-modal></div>
+    <div class="relative mx-auto mt-10 w-[calc(100%-2rem)] max-w-lg fade-in rounded-2xl border border-zinc-800 bg-zinc-900 shadow-2xl sm:mt-20">
+      <div class="flex items-center justify-between border-b border-zinc-800 px-5 py-4">
+        <h3 id="settingsTitle" class="flex items-center gap-2 font-semibold text-white">
+          <i data-lucide="key-round" class="h-5 w-5 text-sky-400"></i> RapidAPI Connection
+        </h3>
+        <button type="button" class="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-white" data-close-modal aria-label="Close">
+          <i data-lucide="x" class="h-5 w-5"></i>
+        </button>
+      </div>
+      <form id="settingsForm" class="space-y-4 px-5 py-5">
+        <div>
+          <label for="apiKeyInput" class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-zinc-400">RapidAPI key</label>
+          <div class="flex items-center rounded-lg border border-zinc-800 bg-zinc-950 focus-within:border-sky-500">
+            <input id="apiKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your X-RapidAPI-Key"
+              class="w-full bg-transparent px-3 py-2.5 font-mono text-sm text-white placeholder-zinc-600 outline-none" />
+            <button type="button" id="toggleKeyVis" class="px-3 text-zinc-400 hover:text-white" aria-label="Show or hide key">
+              <i data-lucide="eye" class="h-4 w-4"></i>
+            </button>
+          </div>
+          <p class="mt-1.5 text-xs text-zinc-500">Stored only in this browser's <code class="text-zinc-400">localStorage</code> and sent only to the RapidAPI host below.</p>
+        </div>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <label class="block sm:col-span-2">
+            <span class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-zinc-400">x-rapidapi-host</span>
+            <input id="apiHostInput" type="text" spellcheck="false" class="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-xs text-white outline-none focus:border-sky-500" />
+          </label>
+          <label class="block">
+            <span class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-zinc-400">Region</span>
+            <input id="apiRegionInput" type="text" spellcheck="false" class="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-xs text-white outline-none focus:border-sky-500" />
+          </label>
+        </div>
+        <label class="block">
+          <span class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-zinc-400">Quote endpoint path</span>
+          <input id="apiPathInput" type="text" spellcheck="false" class="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-xs text-white outline-none focus:border-sky-500" />
+        </label>
+        <div>
+          <span class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-zinc-400">Request preview</span>
+          <pre id="requestPreview" class="thin-scroll overflow-x-auto rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-[11px] leading-relaxed text-zinc-300"></pre>
+        </div>
+        <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
+          <div class="flex gap-2">
+            <button type="button" id="removeKeyBtn" class="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/30 px-3 py-2 text-xs text-rose-300 hover:bg-rose-500/10">
+              <i data-lucide="trash-2" class="h-3.5 w-3.5"></i> Remove key
+            </button>
+            <button type="button" id="clearCacheBtn" class="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800">
+              <i data-lucide="database-zap" class="h-3.5 w-3.5"></i> Clear cache
+            </button>
+          </div>
+          <button type="submit" class="inline-flex items-center gap-2 rounded-lg bg-sky-500 px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-sky-400">
+            <i data-lucide="plug-zap" class="h-4 w-4"></i> Save &amp; connect
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toasts -->
+  <div id="toasts" class="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-[calc(100%-2rem)] max-w-sm flex-col gap-2"></div>
+
+  <script>
+  'use strict';
+
+  /* ======================================================================
+   * 1. CONFIGURATION
+   * ====================================================================== */
+  const CONFIG = {
+    /* -------------------- API INTEGRATION: DEFAULTS --------------------
+     * RapidAPI "Yahoo Finance" (apidojo) quote endpoint. It returns the
+     * standard Yahoo Finance v1/finance/quote JSON tree:
+     *   { quoteResponse: { result: [ { symbol, shortName,
+     *       regularMarketPrice, regularMarketChangePercent, currency, ... } ],
+     *     error: null } }
+     * Host and path are editable in the API Settings modal, so any RapidAPI
+     * Yahoo provider that returns `quoteResponse.result` can be swapped in.
+     * ------------------------------------------------------------------ */
+    DEFAULT_API_HOST: 'apidojo-yahoo-finance-v1.p.rapidapi.com', // -> 'x-rapidapi-host' header + URL host
+    DEFAULT_API_PATH: '/market/v2/get-quotes',                   // quote endpoint path
+    DEFAULT_REGION: 'US',                                        // URL param: region=US
+
+    CACHE_TTL_MS: 5 * 60 * 1000,      // client-side rate limit: 5-minute quote cache
+    REQUEST_TIMEOUT_MS: 10000,        // abort slow requests after 10s
+    FX_SYMBOL: 'GBPUSD=X',            // fetched alongside the stocks to convert USD -> GBP
+
+    DEFAULT_CAPITAL: 15000,           // £15,000 total capital base
+    DEFAULT_CORE_PCT: 70,             // 70% Core / 30% Satellite
+  };
+
+  // The four planned positions and the segment each belongs to.
+  const PLAN_ASSETS = [
+    { ticker: 'AAPL', segment: 'core' },
+    { ticker: 'AVGO', segment: 'core' },
+    { ticker: 'APLD', segment: 'satellite' },
+    { ticker: 'SEZL', segment: 'satellite' },
+  ];
+  const SEGMENT_OF = { AAPL: 'core', AVGO: 'core', APLD: 'satellite', SEZL: 'satellite' };
+
+  // Realistic pre-coded fallback market data (used when no key / API failure).
+  const FALLBACK_QUOTES = {
+    'AAPL':     { price: 333.12, changePct:  0.84, name: 'Apple Inc.',                  currency: 'USD' },
+    'AVGO':     { price: 412.65, changePct:  1.37, name: 'Broadcom Inc.',               currency: 'USD' },
+    'APLD':     { price:  31.48, changePct: -2.15, name: 'Applied Digital Corporation', currency: 'USD' },
+    'SEZL':     { price:  88.20, changePct:  3.42, name: 'Sezzle Inc.',                 currency: 'USD' },
+    'GBPUSD=X': { price:  1.3452, changePct: 0.12, name: 'GBP/USD',                     currency: 'USD' },
+  };
+
+  const LS = {
+    API_KEY: 'psd.apiKey',
+    API_CFG: 'psd.apiConfig',
+    CACHE:   'psd.quoteCache',
+    ALLOC:   'psd.alloc',
+    HOLD:    'psd.holdings',
+    NOTES:   'psd.notes',
+    FX:      'psd.fxOverride',
+  };
+
+  /* ======================================================================
+   * 2. UTILITIES — storage, money math, formatting
+   * ====================================================================== */
+  const store = {
+    get(key, fallback) {
+      try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); }
+      catch { return fallback; }
+    },
+    set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage full / blocked */ } },
+    remove(key) { try { localStorage.removeItem(key); } catch { /* ignore */ } },
+  };
+
+  /* Currency math is done in integer minor units (pence) wherever money is
+   * summed, so 0.1 + 0.2 style float errors never reach the UI. */
+  const toPence   = (n) => Math.round((Number(n) || 0) * 100);
+  const fromPence = (p) => p / 100;
+  const round2    = (n) => Math.round(((Number(n) || 0) + Number.EPSILON) * 100) / 100;
+  const num       = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
+  const clamp     = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
+  const uid       = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+  const fmtGBP = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtShares = new Intl.NumberFormat('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+
+  const gbp = (n) => fmtGBP.format(round2(n));
+  const signedGbp = (n) => (round2(n) > 0 ? '+' : round2(n) < 0 ? '−' : '') + fmtGBP.format(Math.abs(round2(n)));
+  const pct = (n, dp = 2) => `${(Number(n) || 0).toFixed(dp)}%`;
+  const signedPct = (n, dp = 2) => { const v = Number(n) || 0; return (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(dp) + '%'; };
+  const fmtPrice = (n, currency = 'USD') => {
+    if (!Number.isFinite(n)) return '—';
+    if (currency === 'GBP') return fmtGBP.format(n);
+    if (currency === 'GBp') return `${n.toFixed(2)}p`;
+    if (currency === 'USD') return fmtUSD.format(n);
+    return `${n.toFixed(2)} ${currency}`;
+  };
+  const toneClass = (n) => (round2(n) > 0 ? 'text-emerald-400' : round2(n) < 0 ? 'text-rose-400' : 'text-zinc-300');
+
+  const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const sanitizeTicker = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9.\-=^]/g, '').slice(0, 15);
+
+  const timeAgo = (ts) => {
+    const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+    if (s < 60) return 'just now';
+    const m = Math.floor(s / 60); if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`;
+    const d = Math.floor(h / 24); return `${d}d ago`;
+  };
+
+  const $ = (sel) => document.querySelector(sel);
+  const refreshIcons = () => { if (window.lucide && typeof window.lucide.createIcons === 'function') window.lucide.createIcons(); };
+
+  function toast(message, tone = 'info') {
+    const tones = {
+      info:    ['border-sky-500/30',     'text-sky-300',     'info'],
+      success: ['border-emerald-500/30', 'text-emerald-300', 'check-circle-2'],
+      warn:    ['border-amber-500/30',   'text-amber-300',   'alert-triangle'],
+      error:   ['border-rose-500/30',    'text-rose-300',    'x-circle'],
+    }[tone] || [];
+    const el = document.createElement('div');
+    el.className = `pointer-events-auto fade-in flex items-start gap-2 rounded-xl border ${tones[0]} bg-zinc-900/95 px-4 py-3 text-sm text-zinc-200 shadow-xl backdrop-blur`;
+    el.innerHTML = `<i data-lucide="${tones[2]}" class="mt-0.5 h-4 w-4 shrink-0 ${tones[1]}"></i><span>${escapeHtml(message)}</span>`;
+    $('#toasts').appendChild(el);
+    refreshIcons();
+    setTimeout(() => { el.style.transition = 'opacity .3s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 4200);
+  }
+
+  /* ======================================================================
+   * 3. STATE
+   * ====================================================================== */
+  const DEFAULT_ALLOC = { capital: CONFIG.DEFAULT_CAPITAL, corePct: CONFIG.DEFAULT_CORE_PCT, coreSplit: 50, satSplit: 50, wholeShares: false };
+
+  // Illustrative starting positions (purchase prices in USD, the quote currency).
+  const DEFAULT_HOLDINGS = [
+    { id: uid(), ticker: 'AAPL', segment: 'core',      shares: 21,  buyPrice: 318.40, manualPrice: null },
+    { id: uid(), ticker: 'AVGO', segment: 'core',      shares: 17,  buyPrice: 395.10, manualPrice: null },
+    { id: uid(), ticker: 'APLD', segment: 'satellite', shares: 105, buyPrice: 28.90,  manualPrice: null },
+    { id: uid(), ticker: 'SEZL', segment: 'satellite', shares: 36,  buyPrice: 79.55,  manualPrice: null },
+  ];
+
+  const state = {
+    quotes: {},            // SYMBOL -> { price, changePct, name, currency, ts, source: live|cache|stale|fallback }
+    status: { mode: 'fallback', reason: 'No API key configured', fetchedAt: null },
+    loading: false,
+    alloc: { ...DEFAULT_ALLOC, ...store.get(LS.ALLOC, {}) },
+    holdings: store.get(LS.HOLD, null) || DEFAULT_HOLDINGS,
+    notes: store.get(LS.NOTES, []),
+    fxOverride: store.get(LS.FX, null),
+    newsTab: 'all',
+    newsFilter: 'ALL',
+  };
+
+  const saveAlloc    = () => store.set(LS.ALLOC, state.alloc);
+  const saveHoldings = () => store.set(LS.HOLD, state.holdings);
+  const saveNotes    = () => store.set(LS.NOTES, state.notes);
+
+  /* ======================================================================
+   * 4. API INTEGRATION — Yahoo Finance via RapidAPI
+   * ====================================================================== */
+
+  /** API key lives in localStorage under LS.API_KEY (never hard-coded). */
+  const getApiKey = () => (store.get(LS.API_KEY, '') || '').trim();
+
+  /** Host / path / region config (editable in the settings modal). */
+  function getApiConfig() {
+    const cfg = store.get(LS.API_CFG, {}) || {};
+    return {
+      host:   (cfg.host   || CONFIG.DEFAULT_API_HOST).trim(),
+      path:   (cfg.path   || CONFIG.DEFAULT_API_PATH).trim(),
+      region: (cfg.region || CONFIG.DEFAULT_REGION).trim(),
+    };
+  }
+
+  /**
+   * ---------------------- URL PARAMETERS ----------------------
+   * Builds: https://{host}{path}?region=US&symbols=AAPL,AVGO,APLD,SEZL,GBPUSD%3DX
+   *   region  -> market region (e.g. US)
+   *   symbols -> comma-separated ticker list (each symbol URL-encoded,
+   *              commas left literal so the list stays readable)
+   */
+  function buildQuoteUrl(symbols, cfg = getApiConfig()) {
+    const path = cfg.path.startsWith('/') ? cfg.path : `/${cfg.path}`;
+    const symbolsParam = symbols.map(encodeURIComponent).join(',');
+    return `https://${cfg.host}${path}?region=${encodeURIComponent(cfg.region)}&symbols=${symbolsParam}`;
+  }
+
+  /**
+   * ---------------------- HEADER SCHEMA ----------------------
+   *   'x-rapidapi-key'  : user's RapidAPI key (from localStorage)
+   *   'x-rapidapi-host' : the RapidAPI host the key is subscribed to
+   */
+  function buildHeaders(apiKey, cfg = getApiConfig()) {
+    return {
+      'x-rapidapi-key': apiKey,
+      'x-rapidapi-host': cfg.host,
+    };
+  }
+
+  /**
+   * Fetches quotes and parses the standard Yahoo Finance response tree:
+   *   json.quoteResponse.result[] ->
+   *     regularMarketPrice         => current price
+   *     regularMarketChangePercent => daily change %
+   *     shortName                  => asset label
+   * Returns a map SYMBOL -> normalised quote. Throws on any failure so the
+   * caller can fall back gracefully.
+   */
+  async function fetchQuotesFromApi(symbols) {
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error('No API key configured');
+    const cfg = getApiConfig();
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CONFIG.REQUEST_TIMEOUT_MS);
+    try {
+      const res = await fetch(buildQuoteUrl(symbols, cfg), {
+        method: 'GET',
+        headers: buildHeaders(apiKey, cfg),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        const hint = { 401: 'invalid key', 403: 'key not subscribed to this API', 429: 'rate limit reached' }[res.status];
+        throw new Error(`HTTP ${res.status}${hint ? ` — ${hint}` : ''}`);
+      }
+
+      const json = await res.json();
+      const result = json?.quoteResponse?.result;                       // <-- standard Yahoo tree
+      if (!Array.isArray(result)) {
+        const apiErr = json?.quoteResponse?.error?.description || json?.message;
+        throw new Error(apiErr || 'Unexpected response: quoteResponse.result missing');
+      }
+
+      const now = Date.now();
+      const out = {};
+      for (const q of result) {
+        if (!q || !q.symbol || typeof q.regularMarketPrice !== 'number') continue;
+        out[String(q.symbol).toUpperCase()] = {
+          price:     q.regularMarketPrice,                                              // current price
+          changePct: typeof q.regularMarketChangePercent === 'number' ? q.regularMarketChangePercent : 0, // daily %
+          name:      q.shortName || q.longName || q.symbol,                             // label
+          currency:  q.currency || 'USD',
+          ts: now,
+        };
+      }
+      if (!Object.keys(out).length) throw new Error('API returned no usable quotes');
+      return out;
+    } catch (err) {
+      if (err.name === 'AbortError') throw new Error('Request timed out');
+      if (err instanceof TypeError) throw new Error('Network/CORS error reaching RapidAPI');
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /* ---------------------- CLIENT-SIDE RATE LIMITING ----------------------
+   * Every quote is cached per symbol in localStorage with its fetch
+   * timestamp. Symbols younger than CACHE_TTL_MS (5 min) are served from
+   * cache and never re-requested; only stale/missing symbols hit the API.
+   * ---------------------------------------------------------------------- */
+  const loadCache  = () => store.get(LS.CACHE, {}) || {};
+  const saveCache  = (c) => store.set(LS.CACHE, c);
+  const isFresh    = (q) => q && Date.now() - q.ts < CONFIG.CACHE_TTL_MS;
+
+  function trackedSymbols() {
+    const set = new Set(PLAN_ASSETS.map((a) => a.ticker));
+    state.holdings.forEach((h) => { if (h.ticker) set.add(h.ticker); });
+    set.add(CONFIG.FX_SYMBOL);
+    return [...set];
+  }
+
+  function fallbackFor(symbol) {
+    const f = FALLBACK_QUOTES[symbol];
+    return f ? { ...f, ts: Date.now(), source: 'fallback' } : null;
+  }
+
+  /** Orchestrates cache -> API -> fallback and updates state + UI. */
+  async function refreshQuotes({ userInitiated = false } = {}) {
+    if (state.loading) return;
+    const symbols = trackedSymbols();
+    const apiKey = getApiKey();
+    const next = {};
+
+    // --- No key: go straight to fallback data ---
+    if (!apiKey) {
+      symbols.forEach((s) => { const f = fallbackFor(s); if (f) next[s] = f; });
+      state.quotes = next;
+      state.status = { mode: 'fallback', reason: 'No API key configured — showing fallback market data', fetchedAt: Date.now() };
+      renderAll();
+      if (userInitiated) toast('No API key set — using fallback prices.', 'warn');
+      return;
+    }
+
+    const cache = loadCache();
+    const stale = [];
+    symbols.forEach((s) => {
+      if (isFresh(cache[s])) next[s] = { ...cache[s], source: 'cache' };
+      else stale.push(s);
+    });
+
+    if (!stale.length) {
+      state.quotes = next;
+      state.status = { mode: 'cache', reason: null, fetchedAt: oldestTs(next) };
+      renderAll();
+      if (userInitiated) toast(`Served from cache — next API call allowed in ${fmtCountdown(msUntilExpiry())}.`, 'info');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const fetched = await fetchQuotesFromApi(stale);
+      stale.forEach((s) => {
+        if (fetched[s]) {
+          cache[s] = fetched[s];
+          next[s] = { ...fetched[s], source: 'live' };
+        } else {
+          // Symbol not returned (e.g. unknown ticker) -> fallback if we have one
+          const f = fallbackFor(s); if (f) next[s] = f;
+        }
+      });
+      saveCache(cache);
+      state.status = { mode: 'live', reason: null, fetchedAt: Date.now() };
+      if (userInitiated) toast(`Fetched ${Object.keys(fetched).length} live quote(s).`, 'success');
+    } catch (err) {
+      // --- Elegant fallback: reuse last known (expired) cache, else pre-coded data ---
+      stale.forEach((s) => {
+        if (cache[s]) next[s] = { ...cache[s], source: 'stale' };
+        else { const f = fallbackFor(s); if (f) next[s] = f; }
+      });
+      state.status = { mode: 'fallback', reason: `API unavailable (${err.message}) — showing fallback data`, fetchedAt: Date.now() };
+      toast(`Quote request failed: ${err.message}. Using fallback data.`, 'error');
+    } finally {
+      state.quotes = next;
+      setLoading(false);
+      renderAll();
+    }
+  }
+
+  const oldestTs = (quotes) => Math.min(...Object.values(quotes).map((q) => q.ts));
+  function msUntilExpiry() {
+    const cache = loadCache();
+    const ts = trackedSymbols().map((s) => cache[s]?.ts).filter(Boolean);
+    if (!ts.length) return 0;
+    return Math.max(0, Math.min(...ts) + CONFIG.CACHE_TTL_MS - Date.now());
+  }
+  const fmtCountdown = (ms) => { const s = Math.ceil(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+  function setLoading(on) {
+    state.loading = on;
+    const icon = document.querySelector('#refreshBtn svg, #refreshIcon');
+    if (icon) icon.classList.toggle('spin', on);
+    $('#refreshBtn').disabled = on;
+  }
+
+  /* ======================================================================
+   * 5. DOMAIN CALCULATIONS
+   * ====================================================================== */
+  const getQuote = (symbol) => state.quotes[symbol] || null;
+
+  /** GBP per 1 USD conversion uses GBPUSD (USD per GBP). */
+  function getFx() {
+    if (Number.isFinite(state.fxOverride) && state.fxOverride > 0) return state.fxOverride;
+    const q = getQuote(CONFIG.FX_SYMBOL);
+    return q && q.price > 0 ? q.price : FALLBACK_QUOTES[CONFIG.FX_SYMBOL].price;
+  }
+
+  /** Convert an amount in a quote currency into GBP. */
+  function toGBP(amount, currency = 'USD') {
+    if (!Number.isFinite(amount)) return NaN;
+    if (currency === 'GBP') return amount;
+    if (currency === 'GBp') return amount / 100; // LSE pence quotes
+    return amount / getFx();                      // USD (and any other) via GBPUSD
+  }
+
+  /**
+   * Builds the order plan that deploys `capital` across the four assets.
+   * All money is held in integer pence. Share counts are floored (whole or
+   * 4 d.p.), costs ceiled to the penny, so total cost <= capital always.
+   */
+  function computePlan() {
+    const a = state.alloc;
+    const capitalP = toPence(a.capital);
+    const core = a.corePct / 100;
+    const sat = 1 - core;
+    const weights = {
+      AAPL: core * (a.coreSplit / 100),
+      AVGO: core * (1 - a.coreSplit / 100),
+      APLD: sat * (a.satSplit / 100),
+      SEZL: sat * (1 - a.satSplit / 100),
+    };
+
+    const rows = PLAN_ASSETS.map(({ ticker, segment }) => {
+      const q = getQuote(ticker);
+      const currency = q?.currency || 'USD';
+      const priceGBP = q ? toGBP(q.price, currency) : NaN;
+      const pricePence = priceGBP * 100;                       // float pence per share
+      const targetP = Math.round(capitalP * weights[ticker]);
+      let shares = 0;
+      if (pricePence > 0) {
+        const raw = targetP / pricePence;
+        shares = a.wholeShares ? Math.floor(raw + 1e-9) : Math.floor(raw * 1e4 + 1e-6) / 1e4;
+      }
+      const costP = pricePence > 0 ? Math.ceil(shares * pricePence - 1e-6) : 0;
+      return { ticker, segment, quote: q, currency, weight: weights[ticker], targetP, pricePence, shares, costP, swept: 0 };
+    });
+
+    // Whole-share residual sweep: buy one extra share at a time of the most
+    // under-filled asset that still fits in the remaining cash.
+    if (a.wholeShares) {
+      let residual = capitalP - rows.reduce((s, r) => s + r.costP, 0);
+      for (let guard = 0; guard < 20000; guard++) {
+        const affordable = rows.filter((r) => r.pricePence > 0 && Math.ceil((r.shares + 1) * r.pricePence - 1e-6) - r.costP <= residual);
+        if (!affordable.length) break;
+        affordable.sort((x, y) => (y.targetP - y.costP) - (x.targetP - x.costP));
+        const pick = affordable[0];
+        const newCost = Math.ceil((pick.shares + 1) * pick.pricePence - 1e-6);
+        residual -= newCost - pick.costP;
+        pick.shares += 1; pick.swept += 1; pick.costP = newCost;
+      }
+    }
+
+    const deployedP = rows.reduce((s, r) => s + r.costP, 0);
+    return { rows, capitalP, deployedP, residualP: capitalP - deployedP };
+  }
+
+  /** Effective market price for a holding (manual override wins). */
+  function holdingPrice(h) {
+    const q = getQuote(h.ticker);
+    if (Number.isFinite(h.manualPrice) && h.manualPrice > 0) return { price: h.manualPrice, currency: q?.currency || 'USD', source: 'manual', changePct: q?.changePct ?? 0 };
+    if (q) return { price: q.price, currency: q.currency || 'USD', source: q.source, changePct: q.changePct };
+    return { price: NaN, currency: 'USD', source: 'none', changePct: 0 };
+  }
+
+  /** Per-holding metrics in GBP pence. */
+  function computeHoldings() {
+    const rows = state.holdings.map((h) => {
+      const p = holdingPrice(h);
+      const shares = Math.max(0, num(h.shares));
+      const valueP = Number.isFinite(p.price) ? toPence(toGBP(shares * p.price, p.currency)) : 0;
+      const costP  = toPence(toGBP(shares * Math.max(0, num(h.buyPrice)), p.currency));
+      const gainP  = Number.isFinite(p.price) ? valueP - costP : 0;
+      // Today's move: value * pct / (100 + pct) recovers yesterday-close delta
+      const dayP   = Number.isFinite(p.price) && p.source !== 'manual' ? Math.round(valueP * p.changePct / (100 + p.changePct)) : 0;
+      return { h, p, shares, valueP, costP, gainP, dayP, gainPct: costP > 0 ? (gainP / costP) * 100 : 0 };
+    });
+    const totalValueP = rows.reduce((s, r) => s + r.valueP, 0);
+    const totalCostP  = rows.reduce((s, r) => s + r.costP, 0);
+    const totalDayP   = rows.reduce((s, r) => s + r.dayP, 0);
+    rows.forEach((r) => { r.weight = totalValueP > 0 ? (r.valueP / totalValueP) * 100 : 0; });
+    const segValue = (seg) => rows.filter((r) => r.h.segment === seg).reduce((s, r) => s + r.valueP, 0);
+    return {
+      rows, totalValueP, totalCostP, totalDayP,
+      totalGainP: totalValueP - totalCostP,
+      coreP: segValue('core'), satP: segValue('satellite'), otherP: segValue('other'),
+    };
+  }
+
+  /* ======================================================================
+   * 6. RENDERING
+   * ====================================================================== */
+  const SOURCE_BADGE = {
+    live:     ['LIVE',     'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'],
+    cache:    ['CACHED',   'bg-sky-500/15 text-sky-300 border-sky-500/30'],
+    stale:    ['STALE',    'bg-amber-500/15 text-amber-300 border-amber-500/30'],
+    fallback: ['FALLBACK', 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30'],
+    manual:   ['MANUAL',   'bg-violet-500/15 text-violet-300 border-violet-500/30'],
+    none:     ['NO DATA',  'bg-rose-500/15 text-rose-300 border-rose-500/30'],
+  };
+  const badge = (source) => {
+    const [label, cls] = SOURCE_BADGE[source] || SOURCE_BADGE.none;
+    return `<span class="inline-flex items-center rounded border px-1.5 py-px text-[9px] font-semibold tracking-wider ${cls}">${label}</span>`;
+  };
+  const SEG_STYLE = {
+    core:      { label: 'Core',      dot: 'bg-sky-400',    text: 'text-sky-300',    stroke: '#38bdf8' },
+    satellite: { label: 'Satellite', dot: 'bg-violet-400', text: 'text-violet-300', stroke: '#a78bfa' },
+    other:     { label: 'Other',     dot: 'bg-zinc-400',   text: 'text-zinc-300',   stroke: '#a1a1aa' },
+  };
+  const TICKER_COLORS = { AAPL: '#7dd3fc', AVGO: '#0284c7', APLD: '#c4b5fd', SEZL: '#7c3aed' };
+
+  function renderStatus() {
+    const s = state.status;
+    const map = {
+      live:     ['bg-emerald-400', 'text-emerald-300', 'Live data'],
+      cache:    ['bg-sky-400',     'text-sky-300',     'Cached data'],
+      fallback: ['bg-amber-400',   'text-amber-300',   'Fallback data'],
+    };
+    const [dot, txt, label] = map[s.mode] || map.fallback;
+    const exp = getApiKey() && s.mode !== 'fallback' ? msUntilExpiry() : 0;
+    const right = s.mode === 'fallback'
+      ? '<span class="text-zinc-400">offline mode</span>'
+      : `<span class="num text-zinc-400">refresh in <span data-countdown>${fmtCountdown(exp)}</span></span>`;
+    const html = `
+      <span class="relative flex h-2 w-2">
+        ${s.mode === 'live' ? `<span class="absolute inline-flex h-full w-full animate-ping rounded-full ${dot} opacity-60"></span>` : ''}
+        <span class="relative inline-flex h-2 w-2 rounded-full ${dot}"></span>
+      </span>
+      <span class="font-medium ${txt}">${label}</span>
+      <span class="text-zinc-600">·</span>${right}`;
+    $('#dataStatus').innerHTML = html;
+    $('#dataStatus').classList.add('md:flex');
+    $('#dataStatusMobile').innerHTML = html;
+
+    const banner = $('#fallbackBanner');
+    banner.classList.toggle('hidden', s.mode !== 'fallback');
+    $('#fallbackText').textContent = s.reason || 'Running on built-in fallback market data.';
+    $('#bannerSettingsBtn').textContent = getApiKey() ? 'Check API settings' : 'Connect RapidAPI key';
+  }
+
+  function renderKpis(hold) {
+    const a = state.alloc;
+    const capP = toPence(a.capital);
+    const coreP = Math.round(capP * a.corePct / 100);
+    $('#kpiCapital').textContent = gbp(fromPence(capP));
+    $('#kpiCapitalSub').textContent = `Core ${gbp(fromPence(coreP))} · Satellite ${gbp(fromPence(capP - coreP))}`;
+
+    $('#kpiValue').textContent = gbp(fromPence(hold.totalValueP));
+    $('#kpiValueSub').textContent = `Cost basis ${gbp(fromPence(hold.totalCostP))} · ${state.holdings.length} position${state.holdings.length === 1 ? '' : 's'}`;
+
+    const g = fromPence(hold.totalGainP);
+    const gPct = hold.totalCostP > 0 ? (hold.totalGainP / hold.totalCostP) * 100 : 0;
+    const gEl = $('#kpiGain');
+    gEl.textContent = signedGbp(g);
+    gEl.className = `num mt-2 text-2xl font-semibold ${toneClass(g)}`;
+    $('#kpiGainSub').innerHTML = `<span class="${toneClass(g)}">${signedPct(gPct)}</span> <span class="text-zinc-500">since purchase</span>`;
+
+    const d = fromPence(hold.totalDayP);
+    const prevP = hold.totalValueP - hold.totalDayP;
+    const dPct = prevP > 0 ? (hold.totalDayP / prevP) * 100 : 0;
+    const dEl = $('#kpiDay');
+    dEl.textContent = signedGbp(d);
+    dEl.className = `num mt-2 text-2xl font-semibold ${toneClass(d)}`;
+    $('#kpiDaySub').innerHTML = `<span class="${toneClass(d)}">${signedPct(dPct)}</span> <span class="text-zinc-500">vs previous close</span>`;
+  }
+
+  function renderMarketStrip() {
+    const cards = PLAN_ASSETS.map(({ ticker, segment }) => {
+      const q = getQuote(ticker);
+      const seg = SEG_STYLE[segment];
+      if (!q) return `<div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-500">${ticker} — no data</div>`;
+      const up = q.changePct >= 0;
+      return `
+        <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 transition hover:border-zinc-700">
+          <div class="flex items-center justify-between">
+            <span class="flex items-center gap-2 font-semibold text-white"><span class="h-2 w-2 rounded-full ${seg.dot}"></span>${ticker}</span>
+            ${badge(q.source)}
+          </div>
+          <div class="mt-0.5 truncate text-xs text-zinc-400" title="${escapeHtml(q.name)}">${escapeHtml(q.name)}</div>
+          <div class="mt-2 flex items-end justify-between gap-2">
+            <span class="num text-lg font-semibold text-white">${fmtPrice(q.price, q.currency)}</span>
+            <span class="num inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-xs font-medium ${up ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}">
+              <i data-lucide="${up ? 'arrow-up-right' : 'arrow-down-right'}" class="h-3 w-3"></i>${signedPct(q.changePct)}
+            </span>
+          </div>
+        </div>`;
+    });
+
+    const fxQ = getQuote(CONFIG.FX_SYMBOL);
+    const overridden = Number.isFinite(state.fxOverride) && state.fxOverride > 0;
+    cards.push(`
+      <div class="col-span-2 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 md:col-span-1">
+        <div class="flex items-center justify-between">
+          <span class="flex items-center gap-2 font-semibold text-white"><i data-lucide="arrow-left-right" class="h-4 w-4 text-zinc-400"></i>GBP/USD</span>
+          ${badge(overridden ? 'manual' : (fxQ?.source || 'fallback'))}
+        </div>
+        <div class="mt-0.5 text-xs text-zinc-400">USD per £1 · used for conversion</div>
+        <div class="mt-2 flex items-center gap-2">
+          <input id="fxInput" type="number" step="0.0001" min="0.1" value="${getFx().toFixed(4)}"
+            class="num w-24 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-base font-semibold text-white outline-none focus:border-sky-500" aria-label="GBP/USD rate" />
+          ${overridden ? '<button type="button" id="fxSync" class="rounded-md p-1 text-zinc-400 hover:bg-zinc-800 hover:text-white" title="Re-sync with market rate"><i data-lucide="refresh-ccw" class="h-4 w-4"></i></button>' : ''}
+        </div>
+      </div>`);
+    $('#marketStrip').innerHTML = cards.join('');
+  }
+
+  function renderDonut(plan) {
+    const a = state.alloc;
+    const core = a.corePct, sat = 100 - a.corePct;
+    // Outer ring: segment split; inner ring: per-ticker weights. pathLength=100 => dash units are %.
+    let offset = 0;
+    const ring = (r, width, parts) => {
+      offset = 0;
+      return parts.filter((p) => p.v > 0).map((p) => {
+        const gap = parts.filter((x) => x.v > 0).length > 1 ? 0.6 : 0;
+        const seg = `<circle class="donut-seg" cx="21" cy="21" r="${r}" fill="none" stroke="${p.c}" stroke-width="${width}" pathLength="100"
+          stroke-dasharray="${Math.max(0, p.v - gap)} ${100 - Math.max(0, p.v - gap)}" stroke-dashoffset="${-offset}"><title>${p.t}: ${p.v.toFixed(1)}%</title></circle>`;
+        offset += p.v;
+        return seg;
+      }).join('');
+    };
+    const outer = ring(17, 4, [
+      { v: core, c: SEG_STYLE.core.stroke, t: 'Core' },
+      { v: sat,  c: SEG_STYLE.satellite.stroke, t: 'Satellite' },
+    ]);
+    const inner = ring(12.5, 2.5, plan.rows.map((r) => ({ v: r.weight * 100, c: TICKER_COLORS[r.ticker], t: r.ticker })));
+    $('#donut').innerHTML = `
+      <circle cx="21" cy="21" r="17" fill="none" stroke="#27272a" stroke-width="4" />
+      <circle cx="21" cy="21" r="12.5" fill="none" stroke="#1f1f23" stroke-width="2.5" />
+      <g transform="rotate(-90 21 21)">${outer}${inner}</g>`;
+    $('#donutCenterTop').textContent = `${core} / ${sat}`;
+
+    const capP = plan.capitalP;
+    $('#donutLegend').innerHTML = [
+      ['core', core, ['AAPL', 'AVGO']],
+      ['satellite', sat, ['APLD', 'SEZL']],
+    ].map(([seg, p, tickers]) => {
+      const s = SEG_STYLE[seg];
+      const amt = Math.round(capP * p / 100);
+      const sub = tickers.map((t) => {
+        const r = plan.rows.find((x) => x.ticker === t);
+        return `<span class="inline-flex items-center gap-1"><span class="h-1.5 w-1.5 rounded-full" style="background:${TICKER_COLORS[t]}"></span>${t} ${(r.weight * 100).toFixed(1)}%</span>`;
+      }).join('<span class="text-zinc-700">·</span>');
+      return `
+        <div class="rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2">
+          <div class="flex items-center justify-between">
+            <span class="flex items-center gap-2 ${s.text}"><span class="h-2.5 w-2.5 rounded-sm ${s.dot}"></span>${s.label} <span class="num text-zinc-400">${p}%</span></span>
+            <span class="num font-semibold text-white">${gbp(fromPence(amt))}</span>
+          </div>
+          <div class="mt-1 flex flex-wrap gap-x-2 text-[11px] text-zinc-400 num">${sub}</div>
+        </div>`;
+    }).join('');
+  }
+
+  function renderPlan() {
+    const plan = computePlan();
+    const a = state.alloc;
+
+    // Sync controls (without clobbering a field the user is typing in)
+    const setIfIdle = (el, v) => { if (document.activeElement !== el) el.value = v; };
+    setIfIdle($('#capitalInput'), a.capital);
+    setIfIdle($('#coreSlider'), a.corePct);
+    setIfIdle($('#coreInput'), a.corePct);
+    setIfIdle($('#satInput'), 100 - a.corePct);
+    setIfIdle($('#coreSplit'), a.coreSplit);
+    setIfIdle($('#satSplit'), a.satSplit);
+    $('#coreSlider').style.background = `linear-gradient(90deg, #38bdf8 ${a.corePct}%, #a78bfa ${a.corePct}%)`;
+    $('#coreSplit').style.background = `linear-gradient(90deg, ${TICKER_COLORS.AAPL} ${a.coreSplit}%, ${TICKER_COLORS.AVGO} ${a.coreSplit}%)`;
+    $('#satSplit').style.background = `linear-gradient(90deg, ${TICKER_COLORS.APLD} ${a.satSplit}%, ${TICKER_COLORS.SEZL} ${a.satSplit}%)`;
+    $('#coreSplitA').textContent = `${a.coreSplit}%`; $('#coreSplitB').textContent = `${100 - a.coreSplit}%`;
+    $('#satSplitA').textContent = `${a.satSplit}%`;   $('#satSplitB').textContent = `${100 - a.satSplit}%`;
+    document.querySelectorAll('.preset-btn').forEach((b) => {
+      const on = Number(b.dataset.preset) === a.corePct;
+      b.classList.toggle('bg-sky-500/15', on); b.classList.toggle('border-sky-500/40', on); b.classList.toggle('text-sky-200', on);
+    });
+    const tg = $('#wholeToggle');
+    tg.setAttribute('aria-checked', String(a.wholeShares));
+    tg.classList.toggle('bg-emerald-500', a.wholeShares); tg.classList.toggle('bg-zinc-700', !a.wholeShares);
+    tg.firstElementChild.style.transform = a.wholeShares ? 'translateX(20px)' : 'none';
+
+    $('#planBody').innerHTML = plan.rows.map((r) => {
+      const seg = SEG_STYLE[r.segment];
+      const priceOk = r.pricePence > 0;
+      return `
+        <tr class="transition hover:bg-zinc-800/30">
+          <td class="px-3 py-3">
+            <div class="flex items-center gap-2">
+              <span class="h-2.5 w-2.5 rounded-sm" style="background:${TICKER_COLORS[r.ticker]}"></span>
+              <span class="font-semibold text-white">${r.ticker}</span>
+              <span class="text-[10px] uppercase tracking-wider ${seg.text}">${seg.label}</span>
+            </div>
+            <div class="mt-0.5 truncate pl-[18px] text-xs text-zinc-500">${escapeHtml(r.quote?.name || '')}</div>
+          </td>
+          <td class="num px-3 py-3 text-right text-zinc-300">${pct(r.weight * 100, 1)}</td>
+          <td class="num px-3 py-3 text-right text-zinc-200">${gbp(fromPence(r.targetP))}</td>
+          <td class="num px-3 py-3 text-right">
+            <div class="text-zinc-200">${priceOk ? fmtPrice(r.quote.price, r.currency) : '—'}</div>
+            <div class="text-xs text-zinc-500">${priceOk ? gbp(r.pricePence / 100) : ''}</div>
+          </td>
+          <td class="num px-3 py-3 text-right">
+            <span class="text-base font-semibold text-white">${fmtShares.format(r.shares)}</span>
+            ${r.swept ? `<div class="text-[10px] text-emerald-400">+${r.swept} from sweep</div>` : ''}
+          </td>
+          <td class="num px-3 py-3 text-right text-zinc-200">${gbp(fromPence(r.costP))}</td>
+        </tr>`;
+    }).join('');
+
+    $('#planFoot').innerHTML = `
+      <tr>
+        <td class="px-3 py-3 font-medium text-zinc-300">Total</td>
+        <td class="num px-3 py-3 text-right text-zinc-400">100.0%</td>
+        <td class="num px-3 py-3 text-right font-medium text-white">${gbp(fromPence(plan.capitalP))}</td>
+        <td class="num px-3 py-3 text-right text-xs ${plan.residualP > 0 ? 'text-amber-300' : 'text-emerald-400'}" colspan="2">
+          Cash left ${gbp(fromPence(plan.residualP))}
+        </td>
+        <td class="num px-3 py-3 text-right font-semibold text-white">${gbp(fromPence(plan.deployedP))}</td>
+      </tr>`;
+
+    const deployedPct = plan.capitalP > 0 ? (plan.deployedP / plan.capitalP) * 100 : 0;
+    $('#deployMeter').innerHTML = `
+      <div class="mb-1.5 flex items-center justify-between text-xs">
+        <span class="text-zinc-400">Capital deployed</span>
+        <span class="num font-medium ${deployedPct >= 99.9 ? 'text-emerald-400' : 'text-zinc-200'}">${deployedPct.toFixed(2)}%</span>
+      </div>
+      <div class="flex h-2.5 overflow-hidden rounded-full bg-zinc-800">
+        ${plan.rows.map((r) => `<div class="h-full transition-all duration-500" style="width:${plan.capitalP > 0 ? (r.costP / plan.capitalP) * 100 : 0}%;background:${TICKER_COLORS[r.ticker]}" title="${r.ticker} ${gbp(fromPence(r.costP))}"></div>`).join('')}
+      </div>`;
+
+    renderDonut(plan);
+    return plan;
+  }
+
+  function holdingRowHtml(h) {
+    return `
+      <tr data-id="${h.id}" class="group transition hover:bg-zinc-800/25">
+        <td class="px-2 py-2">
+          <input data-field="ticker" type="text" value="${escapeHtml(h.ticker)}" placeholder="TICKER" maxlength="15"
+            class="cell-input w-24 font-semibold uppercase tracking-wide" aria-label="Ticker" />
+          <div data-out="name" class="truncate px-2 text-[11px] text-zinc-500 max-w-[9rem]"></div>
+        </td>
+        <td class="px-2 py-2">
+          <select data-field="segment" class="cell-input w-[8.5rem] cursor-pointer bg-transparent text-sm" aria-label="Segment">
+            ${Object.entries(SEG_STYLE).map(([k, s]) => `<option class="bg-zinc-900" value="${k}" ${h.segment === k ? 'selected' : ''}>${s.label}</option>`).join('')}
+          </select>
+        </td>
+        <td class="px-2 py-2"><input data-field="shares" type="number" min="0" step="any" value="${h.shares}" class="cell-input num w-24 text-right" aria-label="Shares owned" /></td>
+        <td class="px-2 py-2">
+          <div class="flex items-center justify-end"><span data-out="cur1" class="text-xs text-zinc-500">$</span>
+          <input data-field="buyPrice" type="number" min="0" step="any" value="${num(h.buyPrice).toFixed(2)}" class="cell-input num w-24 text-right" aria-label="Purchase price" /></div>
+        </td>
+        <td class="px-2 py-2">
+          <div class="flex items-center justify-end gap-1">
+            <span data-out="srcBadge"></span>
+            <span data-out="cur2" class="text-xs text-zinc-500">$</span>
+            <input data-field="price" type="number" min="0" step="any" class="cell-input num w-24 text-right" aria-label="Current market price" />
+            <button type="button" data-action="sync" class="hidden rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-white" title="Re-sync with market price">
+              <i data-lucide="refresh-ccw" class="h-3.5 w-3.5"></i>
+            </button>
+          </div>
+        </td>
+        <td class="num whitespace-nowrap px-3 py-2 text-right font-medium text-white" data-out="value"></td>
+        <td class="num px-3 py-2 text-right" data-out="gain"></td>
+        <td class="px-3 py-2" data-out="weight"></td>
+        <td class="px-2 py-2 text-right">
+          <button type="button" data-action="delete" class="rounded-md p-1.5 text-zinc-500 opacity-60 transition hover:bg-rose-500/10 hover:text-rose-400 group-hover:opacity-100" aria-label="Remove holding">
+            <i data-lucide="trash-2" class="h-4 w-4"></i>
+          </button>
+        </td>
+      </tr>`;
+  }
+
+  function renderHoldings() {
+    const body = $('#holdingsBody');
+    body.innerHTML = state.holdings.length
+      ? state.holdings.map(holdingRowHtml).join('')
+      : `<tr><td colspan="9" class="px-5 py-10 text-center text-sm text-zinc-500">No holdings yet — add one or apply the allocation plan.</td></tr>`;
+    updateHoldingsComputed();
+    refreshIcons();
+  }
+
+  /** Updates computed cells in place so inputs keep focus while typing. */
+  function updateHoldingsComputed() {
+    const hold = computeHoldings();
+    const curSym = (c) => (c === 'GBP' ? '£' : c === 'GBp' ? 'p' : c === 'USD' ? '$' : c);
+
+    hold.rows.forEach((r) => {
+      const tr = document.querySelector(`tr[data-id="${r.h.id}"]`);
+      if (!tr) return;
+      const q = getQuote(r.h.ticker);
+      tr.querySelector('[data-out="name"]').textContent = q?.name && q.name !== r.h.ticker ? q.name : '';
+      tr.querySelector('[data-out="cur1"]').textContent = curSym(r.p.currency);
+      tr.querySelector('[data-out="cur2"]').textContent = curSym(r.p.currency);
+      tr.querySelector('[data-out="srcBadge"]').innerHTML = badge(r.p.source);
+
+      const priceInput = tr.querySelector('[data-field="price"]');
+      if (document.activeElement !== priceInput) {
+        priceInput.value = Number.isFinite(r.p.price) ? round2(r.p.price).toFixed(2) : '';
+        priceInput.placeholder = Number.isFinite(r.p.price) ? '' : 'enter';
+      }
+      tr.querySelector('[data-action="sync"]').classList.toggle('hidden', !(r.p.source === 'manual' && q));
+
+      const valueCell = tr.querySelector('[data-out="value"]');
+      valueCell.textContent = Number.isFinite(r.p.price) ? gbp(fromPence(r.valueP)) : '—';
+
+      const gain = fromPence(r.gainP);
+      tr.querySelector('[data-out="gain"]').innerHTML = Number.isFinite(r.p.price) && r.costP > 0
+        ? `<div class="${toneClass(gain)} whitespace-nowrap font-medium">${signedGbp(gain)}</div><div class="text-xs ${toneClass(gain)} opacity-80">${signedPct(r.gainPct)}</div>`
+        : '<span class="text-zinc-500">—</span>';
+
+      const seg = SEG_STYLE[r.h.segment] || SEG_STYLE.other;
+      tr.querySelector('[data-out="weight"]').innerHTML = `
+        <div class="flex items-center gap-2">
+          <div class="h-1.5 w-20 overflow-hidden rounded-full bg-zinc-800"><div class="h-full rounded-full transition-all duration-500" style="width:${clamp(r.weight, 0, 100)}%;background:${seg.stroke}"></div></div>
+          <span class="num w-12 text-right text-xs text-zinc-300">${pct(r.weight, 1)}</span>
+        </div>`;
+    });
+
+    const g = fromPence(hold.totalGainP);
+    const gPct = hold.totalCostP > 0 ? (hold.totalGainP / hold.totalCostP) * 100 : 0;
+    $('#holdingsFoot').innerHTML = state.holdings.length ? `
+      <tr class="bg-zinc-900/80">
+        <td class="px-4 py-3 font-medium text-zinc-300" colspan="3">Totals</td>
+        <td class="num px-3 py-3 text-right text-xs text-zinc-400">Cost ${gbp(fromPence(hold.totalCostP))}</td>
+        <td></td>
+        <td class="num px-3 py-3 text-right font-semibold text-white">${gbp(fromPence(hold.totalValueP))}</td>
+        <td class="num px-3 py-3 text-right"><div class="whitespace-nowrap font-semibold ${toneClass(g)}">${signedGbp(g)}</div><div class="text-xs ${toneClass(g)}">${signedPct(gPct)}</div></td>
+        <td class="num px-3 py-3 text-xs text-zinc-400">100%</td>
+        <td></td>
+      </tr>` : '';
+
+    renderDrift(hold);
+    renderKpis(hold);
+  }
+
+  function renderDrift(hold) {
+    const total = hold.totalValueP;
+    const a = state.alloc;
+    const coreActual = total > 0 ? (hold.coreP / total) * 100 : 0;
+    const satActual  = total > 0 ? (hold.satP / total) * 100 : 0;
+    const otherActual = total > 0 ? (hold.otherP / total) * 100 : 0;
+    const drift = coreActual - a.corePct;
+    const needsRebalance = total > 0 && Math.abs(drift) >= 5;
+    $('#driftPanel').innerHTML = `
+      <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+        <span class="font-medium uppercase tracking-wider text-zinc-400">Actual vs target allocation</span>
+        <span class="num ${needsRebalance ? 'text-amber-300' : 'text-zinc-400'}">
+          ${total > 0 ? `Core drift ${drift >= 0 ? '+' : '−'}${Math.abs(drift).toFixed(1)} pts${needsRebalance ? ' · consider rebalancing' : ' · within band'}` : '—'}
+        </span>
+      </div>
+      <div class="mt-2 space-y-1.5">
+        <div class="flex items-center gap-3">
+          <span class="w-14 text-xs text-zinc-500">Actual</span>
+          <div class="flex h-3 flex-1 overflow-hidden rounded-full bg-zinc-800">
+            <div class="h-full bg-sky-400 transition-all duration-500" style="width:${coreActual}%"></div>
+            <div class="h-full bg-violet-400 transition-all duration-500" style="width:${satActual}%"></div>
+            <div class="h-full bg-zinc-500 transition-all duration-500" style="width:${otherActual}%"></div>
+          </div>
+          <span class="num w-24 text-right text-xs text-zinc-300">${coreActual.toFixed(1)} / ${satActual.toFixed(1)}</span>
+        </div>
+        <div class="flex items-center gap-3">
+          <span class="w-14 text-xs text-zinc-500">Target</span>
+          <div class="flex h-3 flex-1 overflow-hidden rounded-full bg-zinc-800">
+            <div class="h-full bg-sky-400/50 transition-all duration-500" style="width:${a.corePct}%"></div>
+            <div class="h-full bg-violet-400/50 transition-all duration-500" style="width:${100 - a.corePct}%"></div>
+          </div>
+          <span class="num w-24 text-right text-xs text-zinc-300">${a.corePct.toFixed(1)} / ${(100 - a.corePct).toFixed(1)}</span>
+        </div>
+      </div>
+      <p class="mt-2 text-[11px] text-zinc-500">Purchase and market prices are in each asset's quote currency (USD for these tickers); £ values convert both at the current GBP/USD rate.</p>`;
+  }
+
+  /* ---------------------- NEWS & NOTES ---------------------- */
+  const H = 3600 * 1000;
+  const NOW = Date.now();
+  const MOCK_NEWS = [
+    { tag: 'AVGO', sentiment: 'bullish', ts: NOW - 0.6 * H, source: 'Semis Desk',
+      title: 'Broadcom lands multi-gigawatt custom XPU contract with hyperscale AI lab',
+      body: 'Deal covers co-designed inference accelerators plus Tomahawk Ethernet fabric; deployments begin next year. Analysts lift AI semiconductor revenue estimates for FY27.' },
+    { tag: 'AAPL', sentiment: 'bullish', ts: NOW - 1.4 * H, source: 'Consumer Tech Wire',
+      title: 'Apple ships major Apple Intelligence software upgrade with on-device agent features',
+      body: 'Point release adds cross-app actions and a larger on-device foundation model; early data shows higher upgrade intent among iPhone 15-era users. Services attach seen as key upside lever.' },
+    { tag: 'APLD', sentiment: 'bullish', ts: NOW - 2.3 * H, source: 'Data Center Dynamics Brief',
+      title: 'Applied Digital energizes next substation at North Dakota HPC campus',
+      body: 'Additional 100 MW of critical IT load brought online ahead of schedule, supporting long-term hyperscaler leases. Management reiterates low-cost, high-efficiency power advantage.' },
+    { tag: 'MACRO', sentiment: 'neutral', ts: NOW - 3.1 * H, source: 'Rates Monitor',
+      title: 'Fed minutes signal patience; 10Y Treasury steady near recent range',
+      body: 'Policymakers flagged sticky services inflation but saw labour-market cooling. Long-duration growth equities remain sensitive to any upside surprise in real yields.' },
+    { tag: 'SEZL', sentiment: 'bullish', ts: NOW - 4.8 * H, source: 'Fintech Ledger',
+      title: 'Sezzle raises full-year guidance on subscription member growth',
+      body: 'Sezzle Anywhere and Premium subscribers continue to climb, lifting take rate; credit losses holding within target band. Shares extend momentum.' },
+    { tag: 'AAPL', sentiment: 'neutral', ts: NOW - 7.5 * H, source: 'Supply Chain Watch',
+      title: 'Apple expands Private Cloud Compute fleet on in-house M-series server silicon',
+      body: 'Supply chain checks point to higher server-chip orders to support cloud-side AI requests; capex discipline remains a focus for investors.' },
+    { tag: 'AVGO', sentiment: 'bullish', ts: NOW - 11 * H, source: 'Networking Insider',
+      title: 'AI networking orders accelerate as Tomahawk 6 switch volume ramps',
+      body: '102.4 Tbps switch silicon gaining share in scale-out AI clusters; VMware integration continues to support software margins.' },
+    { tag: 'SEZL', sentiment: 'bearish', ts: NOW - 15 * H, source: 'Policy Tracker',
+      title: 'BNPL regulatory scrutiny resurfaces in state-level consumer credit proposals',
+      body: 'Draft rules would add affordability checks for pay-in-4 products. Near-term impact limited, but headline risk may add volatility to the satellite sleeve.' },
+    { tag: 'APLD', sentiment: 'neutral', ts: NOW - 22 * H, source: 'Energy & Compute',
+      title: 'Grid interconnection queues lengthen for high-performance computing builds',
+      body: 'Utilities report record demand from AI campuses; operators with secured power and land positioned favourably, though capex funding needs remain elevated.' },
+    { tag: 'MACRO', sentiment: 'bearish', ts: NOW - 28 * H, source: 'FX Strategy',
+      title: 'Sterling firms vs dollar after hotter UK wage print',
+      body: 'Stronger GBP trims sterling-denominated returns on US holdings — worth monitoring for an unhedged USD portfolio.' },
+  ];
+
+  const SENTIMENT = {
+    bullish: ['text-emerald-400', 'trending-up', 'Bullish'],
+    bearish: ['text-rose-400', 'trending-down', 'Bearish'],
+    neutral: ['text-zinc-400', 'minus', 'Neutral'],
+  };
+  const TAG_COLOR = (t) => TICKER_COLORS[t] || '#fbbf24';
+
+  function renderNews() {
+    const tabs = [['all', 'All'], ['news', 'Market news'], ['notes', `My notes (${state.notes.length})`]];
+    $('#newsTabs').innerHTML = tabs.map(([k, l]) =>
+      `<button type="button" data-news-tab="${k}" class="rounded-lg px-2.5 py-1 text-xs font-medium transition ${state.newsTab === k ? 'bg-zinc-100 text-zinc-900' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'}">${l}</button>`).join('');
+    $('#newsFilters').innerHTML = ['ALL', 'AAPL', 'AVGO', 'APLD', 'SEZL', 'MACRO'].map((t) =>
+      `<button type="button" data-news-filter="${t}" class="rounded-full border px-2 py-0.5 text-[11px] transition ${state.newsFilter === t ? 'border-amber-400/50 bg-amber-400/10 text-amber-200' : 'border-zinc-800 text-zinc-400 hover:border-zinc-700'}">${t}</button>`).join('');
+
+    let items = [];
+    if (state.newsTab !== 'notes') items = items.concat(MOCK_NEWS.map((n) => ({ ...n, kind: 'news' })));
+    if (state.newsTab !== 'news') items = items.concat(state.notes.map((n) => ({ ...n, kind: 'note' })));
+    if (state.newsFilter !== 'ALL') items = items.filter((i) => i.tag === state.newsFilter);
+    items.sort((a, b) => b.ts - a.ts);
+
+    $('#newsList').innerHTML = items.length ? items.map((i) => {
+      const [sCls, sIcon, sLbl] = SENTIMENT[i.sentiment] || SENTIMENT.neutral;
+      const q = getQuote(i.tag);
+      const move = q ? `<span class="num ${q.changePct >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${signedPct(q.changePct)}</span>` : '';
+      if (i.kind === 'note') {
+        return `
+          <li class="fade-in rounded-xl border border-amber-400/20 bg-amber-400/[0.04] p-3">
+            <div class="flex items-center justify-between gap-2 text-[11px]">
+              <span class="flex items-center gap-1.5">
+                <i data-lucide="notebook-pen" class="h-3.5 w-3.5 text-amber-300"></i>
+                <span class="rounded px-1.5 py-px font-semibold text-zinc-950" style="background:${TAG_COLOR(i.tag)}">${escapeHtml(i.tag)}</span>
+                <span class="flex items-center gap-0.5 ${sCls}"><i data-lucide="${sIcon}" class="h-3 w-3"></i>${sLbl}</span>
+              </span>
+              <span class="flex items-center gap-1 text-zinc-500">${timeAgo(i.ts)}
+                <button type="button" data-delete-note="${i.id}" class="rounded p-0.5 hover:bg-zinc-800 hover:text-rose-400" aria-label="Delete note"><i data-lucide="x" class="h-3.5 w-3.5"></i></button>
+              </span>
+            </div>
+            <p class="mt-1.5 whitespace-pre-wrap break-words text-sm text-zinc-200">${escapeHtml(i.text)}</p>
+          </li>`;
+      }
+      return `
+        <li class="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3 transition hover:border-zinc-700">
+          <div class="flex items-center justify-between gap-2 text-[11px]">
+            <span class="flex items-center gap-1.5">
+              <span class="rounded px-1.5 py-px font-semibold text-zinc-950" style="background:${TAG_COLOR(i.tag)}">${i.tag}</span>
+              <span class="flex items-center gap-0.5 ${sCls}"><i data-lucide="${sIcon}" class="h-3 w-3"></i>${sLbl}</span>
+              ${move}
+            </span>
+            <span class="text-zinc-500">${timeAgo(i.ts)}</span>
+          </div>
+          <h3 class="mt-1.5 text-sm font-medium leading-snug text-zinc-100">${escapeHtml(i.title)}</h3>
+          <p class="mt-1 text-xs leading-relaxed text-zinc-400">${escapeHtml(i.body)}</p>
+          <div class="mt-1.5 text-[10px] uppercase tracking-wider text-zinc-600">${escapeHtml(i.source)} · simulated</div>
+        </li>`;
+    }).join('') : `<li class="py-10 text-center text-sm text-zinc-500">Nothing here yet.</li>`;
+    refreshIcons();
+  }
+
+  function renderAll() {
+    renderStatus();
+    renderMarketStrip();
+    renderPlan();
+    updateHoldingsComputed();
+    renderNews();
+    refreshIcons();
+  }
+
+  /* ======================================================================
+   * 7. EVENT WIRING
+   * ====================================================================== */
+  function onAllocChange(patch) {
+    Object.assign(state.alloc, patch);
+    state.alloc.capital = Math.max(0, round2(num(state.alloc.capital)));
+    state.alloc.corePct = clamp(Math.round(num(state.alloc.corePct)), 0, 100);
+    saveAlloc();
+    renderPlan();
+    updateHoldingsComputed(); // KPI capital + drift target
+    refreshIcons();
+  }
+
+  function wireAllocation() {
+    $('#capitalInput').addEventListener('input', (e) => onAllocChange({ capital: e.target.value }));
+    $('#coreSlider').addEventListener('input', (e) => onAllocChange({ corePct: e.target.value }));
+    $('#coreInput').addEventListener('input', (e) => { if (e.target.value !== '') onAllocChange({ corePct: e.target.value }); });
+    $('#satInput').addEventListener('input', (e) => { if (e.target.value !== '') onAllocChange({ corePct: 100 - clamp(num(e.target.value), 0, 100) }); });
+    ['#coreInput', '#satInput', '#capitalInput'].forEach((s) => $(s).addEventListener('blur', () => renderPlan()));
+    $('#coreSplit').addEventListener('input', (e) => onAllocChange({ coreSplit: num(e.target.value) }));
+    $('#satSplit').addEventListener('input', (e) => onAllocChange({ satSplit: num(e.target.value) }));
+    document.querySelectorAll('.preset-btn').forEach((b) => b.addEventListener('click', () => onAllocChange({ corePct: Number(b.dataset.preset) })));
+    $('#wholeToggle').addEventListener('click', () => onAllocChange({ wholeShares: !state.alloc.wholeShares }));
+    $('#resetAllocBtn').addEventListener('click', () => { onAllocChange({ ...DEFAULT_ALLOC }); toast('Allocation reset to £15,000 · 70/30.', 'info'); });
+
+    $('#applyPlanBtn').addEventListener('click', () => {
+      const plan = computePlan();
+      if (!confirm('Replace the four planned positions in your watchlist with this plan (shares at current prices)?')) return;
+      plan.rows.forEach((r) => {
+        if (!r.quote) return;
+        const existing = state.holdings.find((h) => h.ticker === r.ticker);
+        const data = { shares: r.shares, buyPrice: round2(r.quote.price), segment: r.segment, manualPrice: null };
+        if (existing) Object.assign(existing, data);
+        else state.holdings.push({ id: uid(), ticker: r.ticker, ...data });
+      });
+      saveHoldings();
+      renderHoldings();
+      toast('Plan applied to watchlist.', 'success');
+    });
+  }
+
+  function wireHoldings() {
+    const body = $('#holdingsBody');
+
+    body.addEventListener('input', (e) => {
+      const tr = e.target.closest('tr[data-id]'); if (!tr) return;
+      const h = state.holdings.find((x) => x.id === tr.dataset.id); if (!h) return;
+      const f = e.target.dataset.field;
+      if (f === 'shares')   h.shares = Math.max(0, num(e.target.value));
+      if (f === 'buyPrice') h.buyPrice = Math.max(0, num(e.target.value));
+      if (f === 'price')    h.manualPrice = e.target.value === '' ? null : Math.max(0, num(e.target.value));
+      if (f === 'ticker' || f === 'segment') return; // handled on change
+      saveHoldings();
+      updateHoldingsComputed();
+    });
+
+    body.addEventListener('change', (e) => {
+      const tr = e.target.closest('tr[data-id]'); if (!tr) return;
+      const h = state.holdings.find((x) => x.id === tr.dataset.id); if (!h) return;
+      const f = e.target.dataset.field;
+      if (f === 'segment') { h.segment = e.target.value; saveHoldings(); updateHoldingsComputed(); }
+      if (f === 'ticker') {
+        const t = sanitizeTicker(e.target.value);
+        e.target.value = t;
+        if (t === h.ticker) return;
+        h.ticker = t; h.manualPrice = null;
+        if (SEGMENT_OF[t]) h.segment = SEGMENT_OF[t];
+        saveHoldings();
+        renderHoldings();
+        if (t && !getQuote(t)) refreshQuotes(); // only stale/missing symbols are requested
+      }
+      if (f === 'price') updateHoldingsComputed(); // normalise displayed value
+    });
+
+    body.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-action]'); if (!btn) return;
+      const tr = btn.closest('tr[data-id]');
+      const idx = state.holdings.findIndex((x) => x.id === tr.dataset.id);
+      if (idx < 0) return;
+      if (btn.dataset.action === 'delete') {
+        const [removed] = state.holdings.splice(idx, 1);
+        saveHoldings(); renderHoldings();
+        toast(`Removed ${removed.ticker || 'holding'}.`, 'info');
+      }
+      if (btn.dataset.action === 'sync') {
+        state.holdings[idx].manualPrice = null;
+        saveHoldings(); updateHoldingsComputed(); refreshIcons();
+      }
+    });
+
+    $('#addHoldingBtn').addEventListener('click', () => {
+      state.holdings.push({ id: uid(), ticker: '', segment: 'other', shares: 0, buyPrice: 0, manualPrice: null });
+      saveHoldings(); renderHoldings();
+      const rows = document.querySelectorAll('#holdingsBody tr[data-id]');
+      rows[rows.length - 1]?.querySelector('[data-field="ticker"]')?.focus();
+    });
+  }
+
+  function wireMarketStrip() {
+    $('#marketStrip').addEventListener('change', (e) => {
+      if (e.target.id !== 'fxInput') return;
+      const v = num(e.target.value);
+      if (v > 0) { state.fxOverride = Math.round(v * 1e4) / 1e4; store.set(LS.FX, state.fxOverride); toast(`GBP/USD set manually to ${state.fxOverride.toFixed(4)}.`, 'info'); }
+      renderAll();
+    });
+    $('#marketStrip').addEventListener('click', (e) => {
+      if (!e.target.closest('#fxSync')) return;
+      state.fxOverride = null; store.remove(LS.FX);
+      renderAll();
+    });
+  }
+
+  function wireNews() {
+    const form = $('#noteForm');
+    const openForm = (show) => {
+      form.classList.toggle('hidden', !show);
+      if (show) { $('#noteTag').value = state.newsFilter !== 'ALL' ? state.newsFilter : 'MACRO'; $('#noteText').focus(); }
+    };
+    $('#addNoteBtn').addEventListener('click', () => openForm(form.classList.contains('hidden')));
+    $('#cancelNoteBtn').addEventListener('click', () => { form.reset(); $('#noteCount').textContent = '0 / 500'; openForm(false); });
+    $('#noteText').addEventListener('input', (e) => { $('#noteCount').textContent = `${e.target.value.length} / 500`; });
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const text = $('#noteText').value.trim();
+      if (!text) return;
+      state.notes.push({ id: uid(), tag: $('#noteTag').value, sentiment: $('#noteSentiment').value, text: text.slice(0, 500), ts: Date.now() });
+      saveNotes();
+      form.reset(); $('#noteCount').textContent = '0 / 500'; openForm(false);
+      if (state.newsTab === 'news') state.newsTab = 'all';
+      renderNews();
+      toast('Macro note saved.', 'success');
+    });
+    $('#newsTabs').addEventListener('click', (e) => { const b = e.target.closest('[data-news-tab]'); if (b) { state.newsTab = b.dataset.newsTab; renderNews(); } });
+    $('#newsFilters').addEventListener('click', (e) => { const b = e.target.closest('[data-news-filter]'); if (b) { state.newsFilter = b.dataset.newsFilter; renderNews(); } });
+    $('#newsList').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-delete-note]'); if (!b) return;
+      state.notes = state.notes.filter((n) => n.id !== b.dataset.deleteNote);
+      saveNotes(); renderNews();
+    });
+  }
+
+  function wireSettings() {
+    const modal = $('#settingsModal');
+    const keyInput = $('#apiKeyInput');
+
+    const updatePreview = () => {
+      const cfg = {
+        host: $('#apiHostInput').value.trim() || CONFIG.DEFAULT_API_HOST,
+        path: $('#apiPathInput').value.trim() || CONFIG.DEFAULT_API_PATH,
+        region: $('#apiRegionInput').value.trim() || CONFIG.DEFAULT_REGION,
+      };
+      const k = keyInput.value.trim();
+      const masked = k ? `${k.slice(0, 4)}${'•'.repeat(Math.max(0, Math.min(k.length - 8, 24)))}${k.slice(-4)}` : '<YOUR_KEY>';
+      $('#requestPreview').textContent =
+        `GET ${buildQuoteUrl(PLAN_ASSETS.map((a) => a.ticker), cfg)}\n` +
+        `x-rapidapi-key:  ${masked}\n` +
+        `x-rapidapi-host: ${cfg.host}\n\n` +
+        `→ quoteResponse.result[].regularMarketPrice\n→ quoteResponse.result[].regularMarketChangePercent\n→ quoteResponse.result[].shortName`;
+    };
+
+    const open = () => {
+      const cfg = getApiConfig();
+      keyInput.value = getApiKey();
+      keyInput.type = 'password';
+      $('#apiHostInput').value = cfg.host;
+      $('#apiPathInput').value = cfg.path;
+      $('#apiRegionInput').value = cfg.region;
+      updatePreview();
+      modal.classList.remove('hidden');
+      setTimeout(() => keyInput.focus(), 50);
+    };
+    const close = () => modal.classList.add('hidden');
+
+    $('#openSettingsBtn').addEventListener('click', open);
+    $('#bannerSettingsBtn').addEventListener('click', open);
+    modal.querySelectorAll('[data-close-modal]').forEach((el) => el.addEventListener('click', close));
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !modal.classList.contains('hidden')) close(); });
+    ['#apiKeyInput', '#apiHostInput', '#apiPathInput', '#apiRegionInput'].forEach((s) => $(s).addEventListener('input', updatePreview));
+    $('#toggleKeyVis').addEventListener('click', () => { keyInput.type = keyInput.type === 'password' ? 'text' : 'password'; });
+
+    $('#settingsForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const key = keyInput.value.trim();
+      store.set(LS.API_CFG, {
+        host: $('#apiHostInput').value.trim() || CONFIG.DEFAULT_API_HOST,
+        path: $('#apiPathInput').value.trim() || CONFIG.DEFAULT_API_PATH,
+        region: $('#apiRegionInput').value.trim() || CONFIG.DEFAULT_REGION,
+      });
+      if (key) store.set(LS.API_KEY, key); else store.remove(LS.API_KEY);
+      store.remove(LS.CACHE); // new credentials -> fetch fresh once
+      close();
+      toast(key ? 'API key saved. Fetching live quotes…' : 'No key saved — staying on fallback data.', key ? 'success' : 'warn');
+      refreshQuotes();
+    });
+    $('#removeKeyBtn').addEventListener('click', () => {
+      store.remove(LS.API_KEY); store.remove(LS.CACHE);
+      keyInput.value = ''; updatePreview();
+      close(); toast('API key removed. Switched to fallback data.', 'warn');
+      refreshQuotes();
+    });
+    $('#clearCacheBtn').addEventListener('click', () => {
+      store.remove(LS.CACHE);
+      toast('Quote cache cleared — next refresh will call the API.', 'info');
+    });
+  }
+
+  /* ======================================================================
+   * 8. BOOT
+   * ====================================================================== */
+  function tick() {
+    // Live countdown to cache expiry; auto-refresh when the cache lapses.
+    if (getApiKey() && state.status.mode !== 'fallback') {
+      const ms = msUntilExpiry();
+      document.querySelectorAll('[data-countdown]').forEach((el) => { el.textContent = fmtCountdown(ms); });
+      if (ms <= 0 && !state.loading && document.visibilityState === 'visible') refreshQuotes();
+    }
+  }
+
+  function init() {
+    // Sanitize anything loaded from storage
+    state.holdings = (Array.isArray(state.holdings) ? state.holdings : DEFAULT_HOLDINGS).map((h) => ({
+      id: h.id || uid(),
+      ticker: sanitizeTicker(h.ticker),
+      segment: SEG_STYLE[h.segment] ? h.segment : 'other',
+      shares: Math.max(0, num(h.shares)),
+      buyPrice: Math.max(0, num(h.buyPrice)),
+      manualPrice: Number.isFinite(h.manualPrice) && h.manualPrice > 0 ? h.manualPrice : null,
+    }));
+    if (!Array.isArray(state.notes)) state.notes = [];
+    saveHoldings();
+
+    wireAllocation();
+    wireHoldings();
+    wireMarketStrip();
+    wireNews();
+    wireSettings();
+    $('#refreshBtn').addEventListener('click', () => refreshQuotes({ userInitiated: true }));
+
+    // Paint immediately with fallback prices, then upgrade to cache/live.
+    PLAN_ASSETS.concat([{ ticker: CONFIG.FX_SYMBOL }]).forEach(({ ticker }) => { state.quotes[ticker] = fallbackFor(ticker); });
+    renderHoldings();
+    renderAll();
+    refreshQuotes();
+
+    setInterval(tick, 1000);
+    setInterval(renderNews, 60 * 1000); // keep relative timestamps fresh
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>
